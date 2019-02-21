@@ -2,6 +2,14 @@
 
 This code is to analyze 2017-2019 retail transaction data to create promotional bundles for increasing revenue. 
 
+
+## Files
+RawDataCleansing.py - Code for parsing the entire txt data file to create two pandas-friendly csv data files. <br />
+SalesAnalysis_Pandas.ipynb - Beginning of data analysis in pandas <br />
+input_salestransactions.TXT	- sample of original file containing 1,668,645 lines. <br />
+output_sales_header.csv - sample of transaction level output	<br />
+output_sales_line.csv - sample of line-item level output<br />
+
 Note - only a sample of the data is shown online.
 
 ## Step 1: Data Cleaning
