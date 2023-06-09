@@ -1,68 +1,106 @@
-# Author: Joshua Chemparathy
-# Purpose: Cleansing of txt file from 15 year old software. Text file combined transaction and line item data, as well as had other errors.
-# Date: January 16, 2019
-# Last Modified: January 29, 2019
-
-import os
-import csv
-import re
 import pandas as pd
 
-# raw data input 
-fn = input('Enter file name: ')
-if len(fn) < 1: fn = 'salestransactions.TXT'
-fn_sales_line = "output_sales_line.csv"
-fn_sales_header = "output_sales_header.csv"
+class TransformationObject:
+    '''
+    Author: Joshua Chemparathy
+    Purpose: Cleansing of txt file from 15-year-old software. Text file combined transaction and line item data, as well as had other errors.
+    Date: January 16, 2019
+    Last Modified:
+        June 9, 2023 - This was a bit of an unnecessary update, but it was a nice little exercise to remind myself of my previous work.
+        Run by updating the input_datafile_name.txt, then run FILENAME.py from the terminal.
+    '''
 
-#delete output files if exists
-if os.path.exists(fn_sales_line):
-  os.remove(fn_sales_line)
-if os.path.exists(fn_sales_header):
-  os.remove(fn_sales_header)
+    def __init__(self):
+        self.LIST_INPUT_SALES_DATA = [
+            'input_salestransactions.TXT'
+            ,
+        ]
+        self.transform_files()
 
-# check whether input file is a txt file. open two csv files to write line item and header data to after parsing. 
-if fn[-4:] == '.TXT':
-    fn_raw = open(fn, "r", encoding= "ISO-8859-1")
-    fh_sales_line = open(fn_sales_line, 'w')
-    fh_sales_header = open(fn_sales_header, 'w')
-    fh_raw = list(csv.reader(fn_raw, delimiter = ','))
-    fw_sales_line = csv.writer(fh_sales_line)
-    fw_sales_header = csv.writer(fh_sales_header)
+    def transform_files(self):
+        for file in self.LIST_INPUT_SALES_DATA:
+            df = self.open_file(file_name=file)
+            df = self.transformation_steps(df=df)
+            self.export_file(df=df, save_file_name='modified_' + file)
+        return df
 
-#write csv file headers
-fw_sales_line.writerow(['trans_id', 'trans_date', 'trans_time', 'sale_id', 'product_desc','product_code', 'product_qty', 'product_price', 'product_tax_id'])
-fw_sales_header.writerow(['trans_id', 'trans_date', 'trans_time', 'subtotal', 'tax_rate', 'tax_amt', 'total'])
+    def open_file(self, file_name):
+        df = pd.read_csv(file_name, sep=',', header=None, encoding='ISO-8859-1', engine='python', names=['col' + str(x) for x in range(50)])
+        return df
 
-#handle the first row of the file and assign it to another mutable variable
-temp_list = [fh_raw[0][0], fh_raw[0][1], fh_raw[0][2]] 
-temp_list_ext = temp_list[:]
+    def transformation_steps(self, df):
+        df = self.isolate_transaction_date_time(df=df)
+        df = self.isolate_transaction_total(df=df)
+        df = self.correct_deviation(df=df)
+        df = self._forward_fill_transaction_dates(df=df)
+        df = self._back_fill_transaction_summary(df=df)
+        df = self.remove_transaction_summary_lines(df=df)
+        df = self.rename_line_item_columns(df=df)
+        df = self.limit_columns(df=df)
+        return df
 
-for count,line in enumerate(fh_raw[1:],1):  #for loop and skip first row
-    if count == len(fh_raw)-1:  #kill the loop at the last line
-        break
-    if re.search('^Ä', fh_raw[count][0]):
-        if fh_raw[count][8] == 'Cash': #manage outlier lines in txt files
-            temp_list_ext.extend([fh_raw[count][2],fh_raw[count][14],fh_raw[count][16],fh_raw[count][19]]) #create sales header and write for txt file outlier
-            fw_sales_header.writerow(temp_list_ext)          
-        else:
-            temp_list_ext.extend([fh_raw[count][2],fh_raw[count][11],fh_raw[count][13],fh_raw[count][16]])#create sales header and write 
-            fw_sales_header.writerow(temp_list_ext)
-        temp_list = [fh_raw[count+1][0],fh_raw[count+1][1],fh_raw[count+1][2]] #set temp_list variable to new transaction id, date, and time for both files 
-        temp_list_ext = temp_list[:]
-        continue
-    if (len(fh_raw[count])<7 or re.search('^Ä', fh_raw[count][6])): #skip the short header lines and blank sales
-        continue
-    temp_list_ext.extend([fh_raw[count][0],fh_raw[count][1],fh_raw[count][2],fh_raw[count][3],fh_raw[count][6],fh_raw[count][7]]) #create sales line and write
-    fw_sales_line.writerow(temp_list_ext)
-    temp_list_ext = temp_list[:] #reset the temp_list_ext variable to be used in for loop for similar sales lines
+    def isolate_transaction_date_time(self, df):
+        subset_condition = df['col5'] == 'Cash'
+        df.loc[subset_condition, 'transaction_id'] = df.loc[subset_condition, 'col0']
+        df.loc[subset_condition, 'transaction_date'] = df.loc[subset_condition, 'col1']
+        df.loc[subset_condition, 'transaction_time'] = df.loc[subset_condition, 'col2']
+        return df
 
-#test if pandas can now read these files
-df = pd.read_csv(fn_sales_header)
-print(df.head(n=5))
-df = pd.read_csv(fn_sales_line)
-print(df.head(n=5))
+    def isolate_transaction_total(self, df):
+        first_condition = df['col0'].str.startswith(('ƒ', 'Ä'))
+        df.loc[first_condition, 'code'] = df.loc[first_condition, 'col14']
+        df.loc[first_condition, 'transaction_subtotal'] = df.loc[first_condition, 'col2']
+        df.loc[first_condition, 'transaction_tax_percent'] = df.loc[first_condition, 'col11']
+        df.loc[first_condition, 'transaction_tax_amount'] = df.loc[first_condition, 'col13']
+        df.loc[first_condition, 'transaction_total'] = df.loc[first_condition, 'col16']
+        return df
 
-#close files
-fn_raw.close()
-fh_sales_line.close()
-fh_sales_header.close()
+    def correct_deviation(self, df):
+        error_condition = df['col8'] != 'Shipping:'
+        df.loc[error_condition, 'transaction_tax_percent'] = df.loc[error_condition, 'col14']
+        df.loc[error_condition, 'transaction_tax_amount'] = df.loc[error_condition, 'col16']
+        df.loc[error_condition, 'transaction_total'] = df.loc[error_condition, 'col19']
+        return df
+
+    def _forward_fill_transaction_dates(self, df):
+        target_columns = ['transaction_id', 'transaction_date', 'transaction_time']
+        df[target_columns] = df[target_columns].ffill()
+        return df
+
+    def _back_fill_transaction_summary(self, df):
+        target_columns = ['transaction_subtotal', 'transaction_tax_percent', 'transaction_tax_amount', 'transaction_total']
+        df[target_columns] = df[target_columns].bfill()
+        return df
+
+    def remove_transaction_summary_lines(self, df):
+        df = df[~(df['col5'] == 'Cash')]
+        df = df[~(df['col0'].str.startswith(('ƒ', 'Ä')))]
+        return df
+
+    def rename_line_item_columns(self, df):
+        LINE_ITEM_RENAME = {
+            "col0": "product_id",
+            "col1": "product_desc",
+            "col2": "product_code",
+            "col3": "product_qty",
+            "col6": "product_price",
+            "col7": "product_tax_id"
+        }
+        df = df.rename(columns=LINE_ITEM_RENAME)
+        return df
+
+    def limit_columns(self, df):
+        export_columns = [
+            'transaction_id', 'transaction_date', 'transaction_time', 'transaction_subtotal',
+            'transaction_tax_percent', 'transaction_tax_amount', 'transaction_total', 'product_id',
+            'product_desc', 'product_code', 'product_qty', 'product_price', 'product_tax_id'
+        ]
+        df = df[export_columns]
+        return df
+
+    def export_file(self, df, save_file_name):
+        df.to_csv(save_file_name, index=False)
+
+
+if __name__ == "__main__":
+    transformed = TransformationObject()
