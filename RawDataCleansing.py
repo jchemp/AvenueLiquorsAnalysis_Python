@@ -96,6 +96,9 @@ class TransformationObject:
             'product_desc', 'product_code', 'product_qty', 'product_price', 'product_tax_id'
         ]
         df = df[export_columns]
+
+        df['price*qty'] = df['product_price'] * df['product_qty']
+
         return df
 
     def export_file(self, df, save_file_name):
